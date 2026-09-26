@@ -1,0 +1,110 @@
+import json
+import queue
+import sys
+import sounddevice as sd
+from vosk import Model, KaldiRecognizer
+import pydirectinput
+
+# 1. callouts to hotbar keys ( add whatever you want here like the ones there )
+MANTRA = {
+    # 1: Exhaustion Strike
+    "strike": "1",
+    "exhaustion": "1",
+    "exhaustion strike": "1",
+
+    # 2: Celestial Assault
+    "assault": "2",
+    "celestial": "2",
+    "celestial assault": "2",
+
+    # 3: Flaming Scourge
+    "scourge": "3",
+    "flaming scourge": "3",
+
+    # 4: Fire Blade
+    "blade": "4",
+    "fire blade": "4",
+    "fireblade": "4",
+
+    # 5: Ash Slam
+    "slam": "5",
+    "ash": "5",
+    "ash slam": "5",
+
+    # Z: Flame Leap
+    "leap": "z",
+    "flame leap": "z",
+
+    # X: Rising Flame
+    "rising": "x",
+    "rising flame": "x",
+
+    # Middle Click: Flame Grab
+    "grab": "mb3",
+    "flame grab": "mb3",
+
+    # Y: Sinister Halo
+    "halo": "y",
+    "sinister": "y",
+    "sinister halo": "y",
+
+    # G: Vent
+    "vent": "g"
+}
+VOCABULARY = [
+    "strike", "exhaustion", "assault", "celestial", "scourge", "flaming",
+    "blade", "fire", "slam", "ash", "leap", "flame", "rising", "grab",
+    "halo", "sinister", "vent", "[unk]"
+]
+
+audio_q = queue.Queue()
+
+def audio_callback(indata, frames, time_info, status):
+    if status:
+        print(f"[!] Audio Status: {status}", file=sys.stderr)
+    audio_q.put(bytes(indata))
+
+def cast_action(key, word):
+    print(f"[>>>] EXECUTE: '{word}' -> Key/Action '{key.upper()}'")
+    if key == "mb3":
+        pydirectinput.click(button="middle")
+    else:
+        pydirectinput.press(key)
+
+def main():
+    print("[*] Loading Vosk")
+    try:
+        model = Model("model")
+    except Exception:
+        print("[X] ERROR: Missing model folder! Make sure the folder inside 'whatever your folder name' is named 'model'.")
+        return
+
+    samplerate = 16000
+    recognizer = KaldiRecognizer(model, samplerate, json.dumps(VOCABULARY))
+    pydirectinput.PAUSE = 0.001
+
+    print("[+] Speak into your mic\n")
+
+    with sd.RawInputStream(samplerate=samplerate, blocksize=1000, dtype='int16',
+                            channels=1, callback=audio_callback):
+        while True:
+            data = audio_q.get()
+            
+            # 1. Full phrase check
+            if recognizer.AcceptWaveform(data):
+                res = json.loads(recognizer.Result()).get("text", "")
+                for word in res.split():
+                    if word in MANTRA:
+                        cast_action(MANTRA[word], word)
+                        break
+            else:
+                # 2. Mid-word partial check 
+                partial_raw = recognizer.PartialResult()
+                for word, key in MANTRA.items():
+                    if f'"{word}"' in partial_raw:
+                        cast_action(key, word)
+                        recognizer.Reset()
+                        break
+
+if __name__ == "__main__":
+    main()
